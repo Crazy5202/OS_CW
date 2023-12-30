@@ -174,20 +174,22 @@ int main() {
         stop = true;
     }
     if (stop) return 1;
-    int max_jobs;
-    std::cout << "Введите максимальное число одновременных процессов: " << std::endl;
+
+    int max_jobs = 3;
+    /*std::cout << "Введите максимальное число одновременных процессов: " << std::endl;
     std::cin >> max_jobs;
     if (max_jobs<=0) {
         std::cout << "Неверное число!" << std::endl;
         return 2;
-    }
+    }*/
+
     std::unordered_map<int, int> enter_step;
     for (const auto &node: graph) {
         enter_step[node.first] = 0;
     }
     for (const auto &node: graph) {
         for (const auto &edge: node.second) {
-            enter_step[edge]++; // Вычисление входящих степеней
+            enter_step[edge]++;
         }
     }
     std::queue<int> planned_jobs;
@@ -212,12 +214,12 @@ int main() {
                     running_jobs.pop();
                 }
                 int status;
-                waitpid(pid, &status, 0);
-                int return_value = WEXITSTATUS(status);
-                if (return_value != 0) {
+                waitpid(pid, &status, WUNTRACED);
+                if (!WIFEXITED(status)) {
+                    std::lock_guard<std::mutex> lock(end_mutex);
                     std::cout << "Job " << id << " завершился с ошибкой" << std::endl;
                     finished = true;
-                    std::lock_guard<std::mutex> lock(end_mutex);
+                    kill(pid,SIGKILL);
                     while (!running_jobs.empty()) {
                         pid = running_jobs.front().second;
                         running_jobs.pop();
@@ -228,9 +230,9 @@ int main() {
                         final_jobs.erase(std::remove(final_jobs.begin(), final_jobs.end(), id), final_jobs.end());
                     } else {
                         for (const auto &edge: graph.at(id)) {
-                            enter_step[edge]--; // Уменьшение входящих степеней для следующих вершин
+                            enter_step[edge]--;
                             if (enter_step[edge] == 0) {
-                                planned_jobs.push(edge); // Добавление вершин с нулевой входящей степенью в очередь
+                                planned_jobs.push(edge);
                             }
                         }
                     }
@@ -241,9 +243,10 @@ int main() {
         }
     });
     while (!final_jobs.empty()) {
-        std::lock_guard<std::mutex> lock(end_mutex);
         if (finished) break;
         while (!planned_jobs.empty() && active_amount < max_jobs) {
+            std::lock_guard<std::mutex> lock(end_mutex);
+            if (finished) break;
             int job = planned_jobs.front();
             planned_jobs.pop();
             pid_t pid = fork();
